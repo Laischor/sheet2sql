@@ -1,4 +1,4 @@
-module xlsx
+module sheet2sql
 
 go 1.25.5
 
