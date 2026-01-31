@@ -30,29 +30,36 @@ const (
 	renameDataType
 )
 
-type model struct {
-	table      string
-	columns    []column
-	data       [][]string
-	cursor     int
-	selected   map[int]struct{}
-	renameType renameType
-	renameMode bool
-	renameTo   string
+type sheet struct {
+	name    string
+	columns []column
+	data    [][]string
 }
 
-func initialModel(columns []column, data [][]string) model {
+type model struct {
+	table             string
+	firstColumnHeader bool
+	sheets            []sheet
+	activeSheet       int
+	cursor            int
+	selected          map[int]struct{}
+	renameType        renameType
+	renameMode        bool
+	renameTo          string
+}
+
+func initialModel(sheets []sheet) model {
 	now := time.Now().Format("20060102150405")
 
 	return model{
-		table:    "tmp_" + now,
-		columns:  columns,
-		data:     data,
-		selected: make(map[int]struct{}),
+		table:       "tmp_" + now,
+		sheets:      sheets,
+		activeSheet: 0,
+		selected:    make(map[int]struct{}),
 	}
 }
 
-func readCSV(file string) [][]string {
+func readCSV(file string) map[string][][]string {
 	f, err := os.Open(file)
 	throw(err)
 
@@ -64,23 +71,34 @@ func readCSV(file string) [][]string {
 	data, err := reader.ReadAll()
 	throw(err)
 
-	return data
+	sheets := make(map[string][][]string)
+
+	sheets["Sheet1"] = data
+
+	return sheets
 }
 
-func readXLSX(file string) [][]string {
+func readXLSX(file string) map[string][][]string {
 	f, err := excelize.OpenFile(file)
 	throw(err)
 
 	defer f.Close()
 
-	rows, err := f.GetRows("Sheet1")
-	throw(err)
+	sheets := make(map[string][][]string)
 
-	return rows
+	for _, sheet := range f.GetSheetList() {
+		rows, err := f.GetRows(sheet)
+		throw(err)
+
+		sheets[sheet] = rows
+	}
+
+	return sheets
 }
 
-func readFile(file string) ([]column, [][]string) {
-	var data [][]string
+func readFile(file string) []sheet {
+	var data map[string][][]string
+	var sheets []sheet
 
 	switch filepath.Ext(strings.ToLower(file)) {
 	case ".xlsx":
@@ -91,32 +109,38 @@ func readFile(file string) ([]column, [][]string) {
 		throw(fmt.Errorf("unsupported file type: %s", file))
 	}
 
-	var columns []column
+	for name, data := range data {
+		var columns []column
 
-	replace := []string{" ", "-", ":", "/", "(", ")"}
+		replace := []string{" ", "-", ":", "/", "(", ")"}
 
-	for _, col := range data[0] {
-		name := strings.TrimSpace(col)
-		name = strings.ToLower(name)
+		for _, col := range data[0] {
+			name := strings.TrimSpace(col)
+			name = strings.ToLower(name)
 
-		for _, r := range replace {
-			name = strings.ReplaceAll(name, r, "_")
+			for _, r := range replace {
+				name = strings.ReplaceAll(name, r, "_")
+			}
+
+			columns = append(columns, column{name, "text"})
 		}
 
-		columns = append(columns, column{name, "text"})
+		sheets = append(sheets, sheet{name, columns, data})
 	}
 
-	return columns, data
+	return sheets
 }
 
 func generateSQL(model model) string {
+	sheet := model.sheets[model.activeSheet]
+
 	s := "CREATE SCHEMA IF NOT EXISTS tmp;\n"
 	s += "CREATE TABLE IF NOT EXISTS tmp." + model.table + " (\n"
 	s += "id SERIAL PRIMARY KEY"
 
 	var cols []string
 
-	for i, choice := range model.columns {
+	for i, choice := range sheet.columns {
 		if _, ok := model.selected[i]; ok {
 			s += fmt.Sprintf(",\n%s %s", choice.name, choice.data_type)
 
@@ -127,10 +151,10 @@ func generateSQL(model model) string {
 	s += ");\n"
 	s += "INSERT INTO " + model.table + " (" + strings.Join(cols, ",") + ") VALUES \n"
 
-	for rowIndex, row := range model.data[1:] {
+	for rowIndex, row := range sheet.data[1:] {
 		var tmp []string
 
-		for i, _ := range model.columns {
+		for i, _ := range sheet.columns {
 			if _, ok := model.selected[i]; ok {
 				tmp = append(tmp, row[i])
 			}
@@ -152,6 +176,8 @@ func (m model) Init() tea.Cmd {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	sheet := m.sheets[m.activeSheet]
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		if m.renameMode {
@@ -165,10 +191,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.table = m.renameTo
 
 				case renameColumn:
-					m.columns[m.cursor].name = m.renameTo
+					sheet.columns[m.cursor].name = m.renameTo
 
 				case renameDataType:
-					m.columns[m.cursor].data_type = m.renameTo
+					sheet.columns[m.cursor].data_type = m.renameTo
 				}
 
 				m.renameMode = false
@@ -202,7 +228,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 			case "down", "j":
-				if m.cursor < len(m.columns)-1 {
+				if m.cursor < len(sheet.columns)-1 {
 					m.cursor++
 				}
 
@@ -215,7 +241,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 			case "a":
-				for i := range m.columns {
+				for i := range sheet.columns {
 					_, ok := m.selected[i]
 					if ok {
 						delete(m.selected, i)
@@ -232,12 +258,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "c":
 				m.renameMode = true
 				m.renameType = renameDataType
-				m.renameTo = m.columns[m.cursor].data_type
+				m.renameTo = sheet.columns[m.cursor].data_type
 
 			case "r":
 				m.renameMode = true
 				m.renameType = renameColumn
-				m.renameTo = m.columns[m.cursor].name
+				m.renameTo = sheet.columns[m.cursor].name
 			}
 		}
 	}
@@ -247,8 +273,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) View() string {
 	longestName := 11
+	sheet := m.sheets[m.activeSheet]
 
-	for _, choice := range m.columns {
+	for _, choice := range sheet.columns {
 		if len(choice.name) > longestName {
 			longestName = len(choice.name)
 		}
@@ -260,7 +287,7 @@ func (m model) View() string {
 	s += fmt.Sprintf("Table name: %s\n\n", m.table)
 	s += fmt.Sprintf("      %-"+length+"s %s\n", "column name", "data type")
 
-	for i, choice := range m.columns {
+	for i, choice := range sheet.columns {
 		cursor := " "
 		if m.cursor == i {
 			cursor = ">"
@@ -275,7 +302,7 @@ func (m model) View() string {
 	}
 
 	if m.renameMode {
-		s += fmt.Sprintf("\nRename %s to: %s\n", m.columns[m.cursor].name, m.renameTo)
+		s += fmt.Sprintf("\nRename %s to: %s\n", sheet.columns[m.cursor].name, m.renameTo)
 	} else {
 		s += "\n\n"
 	}
@@ -286,8 +313,7 @@ func (m model) View() string {
 }
 
 func main() {
-	var columns []column
-	var data [][]string
+	var sheets []sheet
 
 	err := clipboard.Init()
 	throw(err)
@@ -295,10 +321,10 @@ func main() {
 	if len(os.Args) > 1 {
 		file := os.Args[1]
 
-		columns, data = readFile(file)
+		sheets = readFile(file)
 	}
 
-	p := tea.NewProgram(initialModel(columns, data))
+	p := tea.NewProgram(initialModel(sheets))
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Alas, there's been an error: %v", err)
 		os.Exit(1)

@@ -5,6 +5,7 @@ go 1.25.5
 require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/xuri/excelize/v2 v2.10.0
+	golang.design/x/clipboard v0.7.1
 )
 
 require (
@@ -30,7 +31,6 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/xuri/efp v0.0.1 // indirect
 	github.com/xuri/nfp v0.0.2-0.20250530014748-2ddeb826f9a9 // indirect
-	golang.design/x/clipboard v0.7.1 // indirect
 	golang.org/x/crypto v0.43.0 // indirect
 	golang.org/x/exp/shiny v0.0.0-20250606033433-dcc06ee1d476 // indirect
 	golang.org/x/image v0.28.0 // indirect
