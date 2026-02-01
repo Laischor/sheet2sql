@@ -28,6 +28,8 @@ const (
 	renameTable renameType = iota
 	renameColumn
 	renameDataType
+	startAtRow
+	endAtRow
 )
 
 type sheet struct {
@@ -109,7 +111,7 @@ func readFile(file string) []sheet {
 		throw(fmt.Errorf("unsupported file type: %s", file))
 	}
 
-	for name, data := range data {
+	for sheetName, data := range data {
 		var columns []column
 
 		replace := []string{" ", "-", ":", "/", "(", ")"}
@@ -125,7 +127,7 @@ func readFile(file string) []sheet {
 			columns = append(columns, column{name, "text"})
 		}
 
-		sheets = append(sheets, sheet{name, columns, data})
+		sheets = append(sheets, sheet{sheetName, columns, data})
 	}
 
 	return sheets
@@ -307,7 +309,16 @@ func (m model) View() string {
 		s += "\n\n"
 	}
 
-	s += "\nspace - select column, a - select all, r - rename, c - change type, enter - generate sql and copy to clipboard, h - history, q - quit\n"
+	s += "\n"
+	s += "space - select column\n"
+	s += "a - select all\n"
+	s += "r - rename\n"
+	s += "c - change type\n"
+	s += "s - start at row\n"
+	s += "enter - generate sql and copy to clipboard\n"
+	s += "h - history\n"
+	s += "q - quit\n"
+	s += "\n"
 
 	return s
 }
